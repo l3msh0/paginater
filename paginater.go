@@ -15,12 +15,19 @@
 // Package paginater is a helper module for custom pagination calculation.
 package paginater
 
+import (
+	"net/url"
+	"strconv"
+)
+
 // Paginater represents a set of results of pagination calculations.
 type Paginater struct {
 	total     int
 	pagingNum int
 	current   int
 	numPages  int
+	values    url.Values
+	pageKey   string
 }
 
 // New initialize a new pagination calculation and returns a Paginater as result.
@@ -31,10 +38,17 @@ func New(total, pagingNum, current, numPages int) *Paginater {
 	if current <= 0 {
 		current = 1
 	}
-	p := &Paginater{total, pagingNum, current, numPages}
+	p := &Paginater{total, pagingNum, current, numPages, nil, ""}
 	if p.current > p.TotalPages() {
 		p.current = p.TotalPages()
 	}
+	return p
+}
+
+func NewWithQuery(total, pagingNum, current, numPages int, values url.Values, pageKey string) *Paginater {
+	p := New(total, pagingNum, current, numPages)
+	p.values = values
+	p.pageKey = pageKey
 	return p
 }
 
@@ -55,6 +69,10 @@ func (p *Paginater) Previous() int {
 	return p.current - 1
 }
 
+func (p *Paginater) PreviousQuery() string {
+	return p.getQuery(p.Previous())
+}
+
 // HasNext returns true if there is a next page relative to current page.
 func (p *Paginater) HasNext() bool {
 	return p.total > p.current*p.pagingNum
@@ -65,6 +83,10 @@ func (p *Paginater) Next() int {
 		return p.current
 	}
 	return p.current + 1
+}
+
+func (p *Paginater) NextQuery() string {
+	return p.getQuery(p.Next())
 }
 
 // IsLast returns true if current page is the last page.
@@ -101,10 +123,20 @@ func (p *Paginater) PagingNum() int {
 	return p.pagingNum
 }
 
+func (p *Paginater) getQuery(page int) string {
+	if p.values == nil {
+		return ""
+	}
+	p.values.Set(p.pageKey, strconv.Itoa(page))
+	defer p.values.Del(p.pageKey)
+	return p.values.Encode()
+}
+
 // Page presents a page in the paginater.
 type Page struct {
 	num       int
 	isCurrent bool
+	paginater *Paginater
 }
 
 func (p *Page) Num() int {
@@ -113,6 +145,10 @@ func (p *Page) Num() int {
 
 func (p *Page) IsCurrent() bool {
 	return p.isCurrent
+}
+
+func (p *Page) Query() string {
+	return p.paginater.getQuery(p.Num())
 }
 
 func getMiddleIdx(numPages int) int {
@@ -129,14 +165,14 @@ func (p *Paginater) Pages() []*Page {
 		return []*Page{}
 	} else if p.numPages == 1 && p.TotalPages() == 1 {
 		// Only show current page.
-		return []*Page{{1, true}}
+		return []*Page{{1, true, p}}
 	}
 
 	// Total page number is less or equal.
 	if p.TotalPages() <= p.numPages {
 		pages := make([]*Page, p.TotalPages())
 		for i := range pages {
-			pages[i] = &Page{i + 1, i+1 == p.current}
+			pages[i] = &Page{i + 1, i+1 == p.current, p}
 		}
 		return pages
 	}
@@ -174,23 +210,23 @@ func (p *Paginater) Pages() []*Page {
 
 	// There are more previous pages.
 	if offsetIdx == 1 {
-		pages[0] = &Page{-1, false}
+		pages[0] = &Page{-1, false, p}
 	}
 	// There are more next pages.
 	if hasMoreNext {
-		pages[len(pages)-1] = &Page{-1, false}
+		pages[len(pages)-1] = &Page{-1, false, p}
 	}
 
 	// Check previous pages.
 	for i := 0; i < previousNum; i++ {
-		pages[offsetIdx+i] = &Page{i + offsetVal, false}
+		pages[offsetIdx+i] = &Page{i + offsetVal, false, p}
 	}
 
-	pages[offsetIdx+previousNum] = &Page{p.current, true}
+	pages[offsetIdx+previousNum] = &Page{p.current, true, p}
 
 	// Check next pages.
 	for i := 1; i <= nextNum; i++ {
-		pages[offsetIdx+previousNum+i] = &Page{p.current + i, false}
+		pages[offsetIdx+previousNum+i] = &Page{p.current + i, false, p}
 	}
 
 	return pages
